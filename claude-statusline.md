@@ -15,12 +15,10 @@ Claude Code 터미널 하단에 표시되는 커스텀 상태줄(statusline) 스
 {
   "statusLine": {
     "type": "command",
-    "command": "bash /c/Users/[user]/.claude/scripts/context-bar.sh"
+    "command": "bash /Users/[user]/.claude/scripts/context-bar.sh"
   }
 }
 ```
-
-> Windows Git Bash 경로 형식 사용: `/c/Users/[user]/...`
 
 ---
 
@@ -28,7 +26,7 @@ Claude Code 터미널 하단에 표시되는 커스텀 상태줄(statusline) 스
 
 ### 1번째 줄 (메인)
 ```
-모델명 | 📁폴더명 | 🔀브랜치 (파일상태, 동기화상태) | ▓▓▓░░░░░░░ 12% of 200k tokens | 5h:3% 7d:1%
+모델명 | 📁폴더명 | 🔀브랜치 (파일상태, 동기화상태) | ▓▓▓░░░░░░░ 12% of 200k tokens | 5h ██░░░ 35% 7d ▄░░░░ 8%
 ```
 
 | 섹션 | 설명 |
@@ -37,7 +35,7 @@ Claude Code 터미널 하단에 표시되는 커스텀 상태줄(statusline) 스
 | 📁폴더명 | 현재 작업 디렉토리 basename |
 | 🔀브랜치 | Git 현재 브랜치 + 커밋 안 된 파일 수 + upstream 동기화 상태 |
 | 컨텍스트 바 | 10칸 시각 바 (`█▄░`) + 사용률 % + 최대 토큰 수 |
-| Rate limit | 5시간/7일 Claude.ai 구독 사용률 (있을 때만 표시) |
+| Rate limit | 5시간/7일 Claude.ai 구독 사용률을 5칸 바로 표시 (있을 때만) |
 
 ### 2번째 줄
 ```
@@ -95,16 +93,34 @@ transcript 파일에서 실제 토큰 사용량을 계산:
 ░ = 30% 미만 (빈 칸)
 ```
 
-- 대화 시작 시: 시스템 프롬프트/도구/메모리 등 ~20k 베이스라인 추정치 표시 (`~10%`)
-- 대화 진행 중: 마지막 응답의 `input_tokens + cache_read + cache_creation` 합산
+- **대화 시작 시**: 시스템 프롬프트/도구/메모리 등 ~20k 베이스라인 추정치 표시 (`~10%`)
+- **대화 진행 중**: 마지막 응답의 `input_tokens + cache_read + cache_creation` 합산
+- **바 너비**: 10칸 (칸당 10%p)
 
-### Rate Limit
+### Rate Limit 바
 
-Claude.ai 구독 사용률:
-- `5h:3%` — 5시간 윈도우 사용률
-- `7d:1%` — 7일 윈도우 사용률
+Claude.ai 구독 사용률을 5칸 바로 표시:
 
-데이터가 없으면 해당 섹션 미표시.
+```
+5h ██░░░ 35%   — 5시간 윈도우 사용률
+7d ▄░░░░ 8%    — 7일 윈도우 사용률
+```
+
+- **바 너비**: 5칸 (칸당 20%p)
+- 데이터가 없으면 해당 섹션 미표시
+- `make_bar` 함수로 컨텍스트 바와 동일한 로직 공유
+
+### make_bar 함수
+
+바 너비를 가변적으로 받아 재사용 가능한 바 생성 함수:
+
+```bash
+make_bar <pct> <width>
+# 예: make_bar 35 5  →  ██░░░
+# 예: make_bar 35 10 →  ███░░░░░░░
+```
+
+각 칸은 `100/width`% 범위를 담당하며 채워진 정도에 따라 `█`, `▄`, `░` 중 하나를 출력한다.
 
 ### 마지막 사용자 메시지
 
@@ -112,6 +128,7 @@ Claude.ai 구독 사용률:
 - 줄바꿈 → 공백으로 치환
 - `[Request interrupted`, `[Request cancelled` 등 불필요한 메시지 스킵
 - 1번째 줄 너비를 초과하면 `...`으로 잘림
+- 줄 너비 계산 시 ANSI 색상 코드를 제외한 plain text 기준으로 계산 (`rate_limits_plain` 사용)
 
 ---
 
@@ -126,8 +143,8 @@ Claude Code가 stdin으로 JSON을 전달한다. 주요 필드:
   "transcript_path": "/tmp/claude-transcript-xxx.jsonl",
   "context_window": { "context_window_size": 200000 },
   "rate_limits": {
-    "five_hour": { "used_percentage": 3.2 },
-    "seven_day": { "used_percentage": 1.1 }
+    "five_hour": { "used_percentage": 35.5 },
+    "seven_day": { "used_percentage": 8.2 }
   }
 }
 ```
@@ -247,6 +264,25 @@ else
  max_display="${max_k}k"
 fi
 
+# Build a colored bar: make_bar <pct> <width>
+make_bar() {
+ local pct=$1 width=$2
+ local bar=""
+ for ((i=0; i<width; i++)); do
+  local bar_start=$((i * 100 / width))
+  local progress=$((pct - bar_start))
+  local cell_size=$((100 / width))
+  if [[ $progress -ge $((cell_size * 8 / 10)) ]]; then
+   bar+="${C_ACCENT}█${C_RESET}"
+  elif [[ $progress -ge $((cell_size * 3 / 10)) ]]; then
+   bar+="${C_ACCENT}▄${C_RESET}"
+  else
+   bar+="${C_BAR_EMPTY}░${C_RESET}"
+  fi
+ done
+ echo -n "$bar"
+}
+
 # Calculate context bar from transcript
 if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
  context_length=$(jq -s '
@@ -262,7 +298,6 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
  # 20k baseline: includes system prompt (~3k), tools (~15k), memory (~300),
  # plus ~2k for git status, env block, XML framing, and other dynamic context
  baseline=20000
- bar_width=10
 
  if [[ "$context_length" -gt 0 ]]; then
   pct=$((context_length * 100 / max_context))
@@ -274,67 +309,49 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
  fi
 
  [[ $pct -gt 100 ]] && pct=100
-
- bar=""
- for ((i=0; i<bar_width; i++)); do
-  bar_start=$((i * 10))
-  progress=$((pct - bar_start))
-  if [[ $progress -ge 8 ]]; then
-   bar+="${C_ACCENT}█${C_RESET}"
-  elif [[ $progress -ge 3 ]]; then
-   bar+="${C_ACCENT}▄${C_RESET}"
-  else
-   bar+="${C_BAR_EMPTY}░${C_RESET}"
-  fi
- done
-
- ctx="${bar} ${C_GRAY}${pct_prefix}${pct}% of ${max_display} tokens"
+ ctx="$(make_bar $pct 10) ${C_GRAY}${pct_prefix}${pct}% of ${max_display} tokens"
 else
  # Transcript not available yet - show baseline estimate
  baseline=20000
- bar_width=10
  pct=$((baseline * 100 / max_context))
  [[ $pct -gt 100 ]] && pct=100
-
- bar=""
- for ((i=0; i<bar_width; i++)); do
-  bar_start=$((i * 10))
-  progress=$((pct - bar_start))
-  if [[ $progress -ge 8 ]]; then
-   bar+="${C_ACCENT}█${C_RESET}"
-  elif [[ $progress -ge 3 ]]; then
-   bar+="${C_ACCENT}▄${C_RESET}"
-  else
-   bar+="${C_BAR_EMPTY}░${C_RESET}"
-  fi
- done
-
- ctx="${bar} ${C_GRAY}~${pct}% of ${max_display} tokens"
+ ctx="$(make_bar $pct 10) ${C_GRAY}~${pct}% of ${max_display} tokens"
 fi
 
-# Extract rate limits
+# Extract rate limits as bars
 rate_limits=""
-five_pct=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty')
-seven_pct=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty')
-[[ -n "$five_pct" ]] && rate_limits="5h:$(printf '%.0f' "$five_pct")%"
-[[ -n "$seven_pct" ]] && rate_limits="${rate_limits:+$rate_limits }7d:$(printf '%.0f' "$seven_pct")%"
+rate_limits_plain=""
+five_pct_raw=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty')
+seven_pct_raw=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty')
+if [[ -n "$five_pct_raw" ]]; then
+ five_pct=$(printf '%.0f' "$five_pct_raw")
+ [[ $five_pct -gt 100 ]] && five_pct=100
+ rate_limits="${C_GRAY}5h $(make_bar $five_pct 5) ${five_pct}%"
+ rate_limits_plain="5h xxxxx ${five_pct}%"
+fi
+if [[ -n "$seven_pct_raw" ]]; then
+ seven_pct=$(printf '%.0f' "$seven_pct_raw")
+ [[ $seven_pct -gt 100 ]] && seven_pct=100
+ rate_limits+="${rate_limits:+ }${C_GRAY}7d $(make_bar $seven_pct 5) ${seven_pct}%"
+ rate_limits_plain+="${rate_limits_plain:+ }7d xxxxx ${seven_pct}%"
+fi
 
 # Build output: Model | Dir | Branch (uncommitted) | Context
 output="${C_ACCENT}${model}${C_GRAY} | 📁${dir}"
 [[ -n "$branch" ]] && output+=" | 🔀${branch} ${git_status}"
 output+=" | ${ctx}"
-[[ -n "$rate_limits" ]] && output+=" | ${C_ACCENT}${rate_limits}"
+[[ -n "$rate_limits" ]] && output+=" | ${rate_limits}"
 output+="${C_RESET}"
 
 printf '%b\n' "$output"
 
 # Get user's last message (text only, not tool results, skip unhelpful messages)
 if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
- # Calculate visible length (without ANSI codes) - 10 chars for bar + content
+ # Calculate visible length (without ANSI codes) using plain text equivalents
  plain_output="${model} | 📁${dir}"
  [[ -n "$branch" ]] && plain_output+=" | 🔀${branch} ${git_status}"
  plain_output+=" | xxxxxxxxxx ${pct}% of ${max_display} tokens"
- [[ -n "$rate_limits" ]] && plain_output+=" | ${rate_limits}"
+ [[ -n "$rate_limits_plain" ]] && plain_output+=" | ${rate_limits_plain}"
  max_len=${#plain_output}
  last_user_msg=$(jq -rs '
  # Messages to skip (not useful as context)
@@ -374,6 +391,11 @@ fi
 
 ### 섹션 제거
 `output` 조합 부분에서 불필요한 라인을 주석 처리.
+
+### 바 너비 변경
+`make_bar` 호출 시 두 번째 인자로 원하는 칸 수 지정:
+- 컨텍스트 바: `make_bar $pct 10` (기본 10칸)
+- Rate limit 바: `make_bar $pct 5` (기본 5칸)
 
 ### 2번째 줄 (마지막 메시지) 비활성화
 스크립트 하단의 `# Get user's last message` 블록 전체를 주석 처리.

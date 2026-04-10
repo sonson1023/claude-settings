@@ -1,157 +1,4 @@
-# Claude Code Statusline - context-bar.sh
-
-## 개요
-
-Claude Code 터미널 하단에 표시되는 커스텀 상태줄(statusline) 스크립트.
-모델 정보, Git 상태, 컨텍스트 사용량, Rate limit 등을 한 줄로 보여준다.
-
-## 설정 방법
-
-### settings.json 위치
-`~/.claude/settings.json`
-
-### 설정 내용
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "bash /Users/[user]/.claude/scripts/context-bar.sh"
-  }
-}
-```
-
----
-
-## 표시 형식
-
-### 1번째 줄 (메인)
-```
-모델명 | 📁폴더명 | 🔀브랜치 (파일상태, 동기화상태) | ▓▓▓░░░░░░░ 12% of 200k tokens | 5h ██░░░ 35% 7d ▄░░░░ 8%
-```
-
-| 섹션 | 설명 |
-|------|------|
-| 모델명 | `model.display_name` 또는 `model.id` |
-| 📁폴더명 | 현재 작업 디렉토리 basename |
-| 🔀브랜치 | Git 현재 브랜치 + 커밋 안 된 파일 수 + upstream 동기화 상태 |
-| 컨텍스트 바 | 10칸 시각 바 (`█▄░`) + 사용률 % + 최대 토큰 수 |
-| Rate limit | 5시간/7일 Claude.ai 구독 사용률을 5칸 바로 표시 (있을 때만) |
-
-### 2번째 줄
-```
-💬 마지막 사용자 메시지 (1번째 줄 너비만큼 잘림)
-```
-
----
-
-## 기능 상세
-
-### 색상 테마
-
-스크립트 상단의 `COLOR` 변수로 변경:
-
-```bash
-COLOR="blue"  # 기본값
-```
-
-| 테마 | ANSI 코드 |
-|------|-----------|
-| `orange` | `\033[38;5;173m` |
-| `blue` | `\033[38;5;74m` |
-| `teal` | `\033[38;5;66m` |
-| `green` | `\033[38;5;71m` |
-| `lavender` | `\033[38;5;139m` |
-| `rose` | `\033[38;5;132m` |
-| `gold` | `\033[38;5;136m` |
-| `slate` | `\033[38;5;60m` |
-| `cyan` | `\033[38;5;37m` |
-| 기타 | gray (기본 텍스트 색과 동일) |
-
-### Git 상태 표시
-
-- **파일 0개**: `(0 files uncommitted, synced 5m ago)`
-- **파일 1개**: `(src/index.ts uncommitted, 2 ahead)` — 파일명 직접 표시
-- **파일 N개**: `(3 files uncommitted, 1 behind)`
-- **upstream 없음**: `(2 files uncommitted, no upstream)`
-
-동기화 상태:
-| 상태 | 표시 |
-|------|------|
-| 동기화됨 | `synced` 또는 `synced 5m ago` |
-| 로컬이 앞섬 | `N ahead` |
-| 리모트가 앞섬 | `N behind` |
-| 양쪽 다름 | `N ahead, M behind` |
-| upstream 미설정 | `no upstream` |
-
-### 컨텍스트 사용량 바
-
-transcript 파일에서 실제 토큰 사용량을 계산:
-
-```
-█ = 80% 이상 채워진 칸
-▄ = 30~79% 채워진 칸
-░ = 30% 미만 (빈 칸)
-```
-
-- **대화 시작 시**: 시스템 프롬프트/도구/메모리 등 ~20k 베이스라인 추정치 표시 (`~10%`)
-- **대화 진행 중**: 마지막 응답의 `input_tokens + cache_read + cache_creation` 합산
-- **바 너비**: 10칸 (칸당 10%p)
-
-### Rate Limit 바
-
-Claude.ai 구독 사용률을 5칸 바로 표시:
-
-```
-5h ██░░░ 35%   — 5시간 윈도우 사용률
-7d ▄░░░░ 8%    — 7일 윈도우 사용률
-```
-
-- **바 너비**: 5칸 (칸당 20%p)
-- 데이터가 없으면 해당 섹션 미표시
-- `make_bar` 함수로 컨텍스트 바와 동일한 로직 공유
-
-### make_bar 함수
-
-바 너비를 가변적으로 받아 재사용 가능한 바 생성 함수:
-
-```bash
-make_bar <pct> <width>
-# 예: make_bar 35 5  →  ██░░░
-# 예: make_bar 35 10 →  ███░░░░░░░
-```
-
-각 칸은 `100/width`% 범위를 담당하며 채워진 정도에 따라 `█`, `▄`, `░` 중 하나를 출력한다.
-
-### 마지막 사용자 메시지
-
-- transcript에서 마지막 `user` 타입 메시지의 텍스트만 추출
-- 줄바꿈 → 공백으로 치환
-- `[Request interrupted`, `[Request cancelled` 등 불필요한 메시지 스킵
-- 1번째 줄 너비를 초과하면 `...`으로 잘림
-- 줄 너비 계산 시 ANSI 색상 코드를 제외한 plain text 기준으로 계산 (`rate_limits_plain` 사용)
-
----
-
-## 입력 데이터
-
-Claude Code가 stdin으로 JSON을 전달한다. 주요 필드:
-
-```json
-{
-  "model": { "display_name": "Claude Sonnet 4", "id": "claude-sonnet-4-..." },
-  "cwd": "/path/to/project",
-  "transcript_path": "/tmp/claude-transcript-xxx.jsonl",
-  "context_window": { "context_window_size": 200000 },
-  "rate_limits": {
-    "five_hour": { "used_percentage": 35.5 },
-    "seven_day": { "used_percentage": 8.2 }
-  }
-}
-```
-
----
-
-## 스크립트 전체 소스
+# Claude Code Statusline Script - Full Content
 
 ```bash
 #!/bin/bash
@@ -318,22 +165,57 @@ else
  ctx="$(make_bar $pct 10) ${C_GRAY}~${pct}% of ${max_display} tokens"
 fi
 
+# Format remaining time until rate limit reset
+format_remaining() {
+ local reset_at="$1"
+ [[ -z "$reset_at" ]] && return
+ local now
+ now=$(date +%s)
+ # reset_at may be in milliseconds (>1e12) or seconds
+ if [[ ${#reset_at} -ge 13 ]]; then
+  reset_at=$((reset_at / 1000))
+ fi
+ local remaining=$((reset_at - now))
+ [[ $remaining -le 0 ]] && echo "resetting" && return
+ local hours=$((remaining / 3600))
+ local mins=$(( (remaining % 3600) / 60 ))
+ if [[ $hours -gt 0 ]]; then
+  echo "${hours}h${mins}m left"
+ else
+  echo "${mins}m left"
+ fi
+}
+
 # Extract rate limits as bars
 rate_limits=""
 rate_limits_plain=""
 five_pct_raw=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty')
+five_reset_raw=$(echo "$input" | jq -r '.rate_limits.five_hour.reset_at // empty')
 seven_pct_raw=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty')
+seven_reset_raw=$(echo "$input" | jq -r '.rate_limits.seven_day.reset_at // empty')
 if [[ -n "$five_pct_raw" ]]; then
  five_pct=$(printf '%.0f' "$five_pct_raw")
  [[ $five_pct -gt 100 ]] && five_pct=100
- rate_limits="${C_GRAY}5h $(make_bar $five_pct 5) ${five_pct}%"
- rate_limits_plain="5h xxxxx ${five_pct}%"
+ five_remaining=$(format_remaining "$five_reset_raw")
+ if [[ -n "$five_remaining" ]]; then
+  rate_limits="${C_GRAY}5h $(make_bar $five_pct 5) ${five_pct}% (${five_remaining})"
+  rate_limits_plain="5h xxxxx ${five_pct}% (${five_remaining})"
+ else
+  rate_limits="${C_GRAY}5h $(make_bar $five_pct 5) ${five_pct}%"
+  rate_limits_plain="5h xxxxx ${five_pct}%"
+ fi
 fi
 if [[ -n "$seven_pct_raw" ]]; then
  seven_pct=$(printf '%.0f' "$seven_pct_raw")
  [[ $seven_pct -gt 100 ]] && seven_pct=100
- rate_limits+="${rate_limits:+ }${C_GRAY}7d $(make_bar $seven_pct 5) ${seven_pct}%"
- rate_limits_plain+="${rate_limits_plain:+ }7d xxxxx ${seven_pct}%"
+ seven_remaining=$(format_remaining "$seven_reset_raw")
+ if [[ -n "$seven_remaining" ]]; then
+  rate_limits+="${rate_limits:+ }${C_GRAY}7d $(make_bar $seven_pct 5) ${seven_pct}% (${seven_remaining})"
+  rate_limits_plain+="${rate_limits_plain:+ }7d xxxxx ${seven_pct}% (${seven_remaining})"
+ else
+  rate_limits+="${rate_limits:+ }${C_GRAY}7d $(make_bar $seven_pct 5) ${seven_pct}%"
+  rate_limits_plain+="${rate_limits_plain:+ }7d xxxxx ${seven_pct}%"
+ fi
 fi
 
 # Build output: Model | Dir | Branch (uncommitted) | Context
@@ -381,21 +263,3 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
  fi
 fi
 ```
-
----
-
-## 커스터마이징
-
-### 색상 변경
-`context-bar.sh` 상단의 `COLOR="blue"` 값을 원하는 테마로 변경.
-
-### 섹션 제거
-`output` 조합 부분에서 불필요한 라인을 주석 처리.
-
-### 바 너비 변경
-`make_bar` 호출 시 두 번째 인자로 원하는 칸 수 지정:
-- 컨텍스트 바: `make_bar $pct 10` (기본 10칸)
-- Rate limit 바: `make_bar $pct 5` (기본 5칸)
-
-### 2번째 줄 (마지막 메시지) 비활성화
-스크립트 하단의 `# Get user's last message` 블록 전체를 주석 처리.

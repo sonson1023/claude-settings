@@ -1,4 +1,100 @@
-# Claude Code Statusline Script - Full Content
+# Claude Code Statusline Script
+
+Claude Code 터미널 상태표시줄(statusline) 커스텀 스크립트입니다.  
+모델명, 현재 디렉터리, Git 상태, 컨텍스트 사용량, Rate Limit 남은 시간을 한 줄에 표시합니다.
+
+---
+
+## 표시 예시
+
+```
+Claude Sonnet 4.5 | 📁myproject | 🔀main (2 files uncommitted, synced 3m ago) | ████████░░ 42% of 200k tokens | 5h ███░░ 31% (1h24m left) | 7d █░░░░ 18% (2d11h left)
+💬 이전에 입력한 메시지 내용...
+```
+
+---
+
+## 표시 항목
+
+| 항목 | 설명 |
+|------|------|
+| 모델명 | 현재 사용 중인 Claude 모델 |
+| 📁 디렉터리 | 현재 작업 디렉터리 이름 |
+| 🔀 Git 브랜치 | 브랜치명 + 미커밋 파일 수 + upstream 동기화 상태 |
+| 컨텍스트 바 | 전체 컨텍스트 윈도우 대비 토큰 사용률 (10칸 바) |
+| 5h Rate Limit | 5시간 윈도우 사용률 + 리셋까지 남은 시간 |
+| 7d Rate Limit | 7일 윈도우 사용률 + 리셋까지 남은 시간 |
+| 💬 마지막 메시지 | 사용자가 마지막으로 입력한 메시지 (첫 번째 줄) |
+
+---
+
+## 설치 방법
+
+### 1. 스크립트 저장
+
+아래 스크립트를 `~/.claude/scripts/context-bar.sh` 에 저장합니다.
+
+```bash
+mkdir -p ~/.claude/scripts
+# 아래 스크립트 내용을 붙여넣기
+```
+
+### 2. 실행 권한 부여
+
+```bash
+chmod +x ~/.claude/scripts/context-bar.sh
+```
+
+### 3. Claude Code settings.json 설정
+
+`~/.claude/settings.json` 에 아래 항목을 추가합니다.
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "bash /Users/YOUR_USERNAME/.claude/scripts/context-bar.sh"
+  }
+}
+```
+
+> `YOUR_USERNAME` 을 실제 사용자 이름으로 변경하세요.
+
+---
+
+## 색상 테마 변경
+
+스크립트 상단의 `COLOR` 변수를 변경하면 됩니다.
+
+```bash
+COLOR="blue"   # gray | orange | blue | teal | green | lavender | rose | gold | slate | cyan
+```
+
+---
+
+## 의존성
+
+- `jq` — JSON 파싱 (`brew install jq`)
+- `git` — Git 상태 조회
+- `bash` 4.0 이상
+
+---
+
+## 변경 이력
+
+### v1.1.0
+- Rate Limit 남은 시간 표시 추가 (`Xh Ym left` 형식)
+- `reset_at` 필드 파싱 추가 (ms/s 단위 자동 감지)
+- 리셋 직전일 경우 `resetting` 표시
+
+### v1.0.0
+- 최초 릴리즈
+- 모델명, 디렉터리, Git 상태, 컨텍스트 바, Rate Limit 사용률 표시
+- 마지막 사용자 메시지 표시
+
+---
+
+## 스크립트 전문
 
 ```bash
 #!/bin/bash
